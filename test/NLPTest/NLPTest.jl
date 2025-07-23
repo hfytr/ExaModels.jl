@@ -8,6 +8,8 @@ using JuMP, PowerModels, MadNLP, Percival
 import ..BACKENDS
 
 const NLP_TEST_ARGUMENTS = [
+    ("ac_power_struct", "pglib_opf_case3_lmbd.m"),
+    ("ac_power_struct", "pglib_opf_case14_ieee.m"),
     ("luksan_vlcek", 3),
     ("luksan_vlcek", 20),
     ("ac_power", "pglib_opf_case3_lmbd.m"),
@@ -31,6 +33,7 @@ end
 
 include("luksan.jl")
 include("power.jl")
+include("power_struct.jl")
 include("parameter_test.jl")
 
 function test_nlp(m1, m2; full = false)
@@ -134,9 +137,14 @@ function runtests()
                         jump_model = getfield(@__MODULE__, Symbol("_jump_$(name)_model"))
 
                         m, vars0, cons0 = exa_model(nothing, args)
+                        @info m
+                        @info m.cons
+                        @info typeof(m.cons)
+                        @info m.objs
                         m0 = WrapperNLPModel(m)
 
                         m, vars2, cons2 = jump_model(nothing, args)
+                        @info m
                         m2 = MathOptNLPModel(m)
 
                         set_optimizer(m, MadNLP.Optimizer)

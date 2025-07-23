@@ -25,6 +25,7 @@ import NLPModels:
 import SolverCore
 import Printf
 
+
 include("templates.jl")
 include("graph.jl")
 include("register.jl")

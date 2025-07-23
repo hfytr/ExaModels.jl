@@ -70,7 +70,7 @@ struct ParSource <: AbstractNode end
 """
     ParIndexed{I, J}
 
-A parameterized data node
+A parameterized data node which represents an indexing operation.
 
 # Fields:
 - `inner::I`: parameter for the data
@@ -80,6 +80,20 @@ struct ParIndexed{I,J} <: AbstractNode
 end
 
 @inline ParIndexed(inner::I, n) where {I} = ParIndexed{I,n}(inner)
+
+"""
+    ParFielded{I, J}
+
+A parameterized data node which represents a getfield() operation
+
+# Fields:
+- `inner::I`: parameter for the data
+"""
+struct ParFielded{I,J} <: AbstractNode
+    inner::I
+end
+
+@inline ParFielded(inner::I, f) where {I} = ParFielded{I,f}(inner)
 """
     Node1{F, I}
 
@@ -114,16 +128,55 @@ struct SecondFixed{F}
 end
 
 @inline Base.getindex(n::ParSource, i) = ParIndexed(n, i)
+@inline Base.getproperty(n::ParSource, f) = ParFielded(n, f)
 @inline Base.getindex(n::VarSource, i) = Var(i)
 @inline Base.getindex(::ParameterSource, i) = ParameterNode(i)
-Par(iter::Type) = ParSource()
-Par(iter, idx...) = ParIndexed(Par(iter, idx[2:end]...), idx[1])
-Par(iter::Type{T}, idx...) where {T<:Tuple} =
-    Tuple(Par(p, i, idx...) for (i, p) in enumerate(T.parameters))
+function Par(iter::Type{T}, idx...) where T
+    if fieldcount(T) > 0
+        FakeCompositeType([(field, fieldtype(T, field)) for field in fieldnames(T)], idx, string(T))
+    elseif idx == ()
+        ParSource()
+    elseif typeof(idx[1]) <: Int
+        ParIndexed(Par(iter, idx[2:end]...), idx[1])
+    elseif typeof(idx[1]) == Symbol
+        ParFielded(Par(iter, idx[2:end]...), idx[1])
+    end
+end
 
-Par(iter::Type{T}, idx...) where {T<:NamedTuple} = NamedTuple{T.parameters[1]}(
-    Par(p, i, idx...) for (i, p) in enumerate(T.parameters[2].parameters)
-)
+"""
+    struct FakeCompositeType
+        # typically we have so few keys, hash table isn't worth it
+        # binary tree would be better, but not worth the dependancy
+        fields :: Vector{Tuple{Any, DataType}}
+        idx :: Any
+        name :: String
+    end
+
+A type which is passed to gen.f when building a constraint / objective.
+This type fakes another composite (named tuple, struct, tuple, etc), having all the same fields, but with no stored data.
+"""
+struct FakeCompositeType
+    # typically we have so few keys, hash table isn't worth it
+    # binary tree would be better, but not worth the dependancy
+    fields :: Vector{Tuple{Any, DataType}}
+    idx :: Any
+    name :: String
+end
+
+# for use in list comprehensions
+Base.indexed_iterate(fp::FakeCompositeType, i::Int, state=1) = (getproperty(fp, i), i+1)
+
+Base.getindex(fp::FakeCompositeType, i::Int) = getproperty(fp, i)
+Base.getproperty(fp::FakeCompositeType, sym::Symbol) = sym in fieldnames(FakeCompositeType) ? getfield(fp, sym) : __get_fp_property(fp, sym)
+Base.getproperty(fp::FakeCompositeType, prop::Any) = __get_fp_property(fp, prop)
+function __get_fp_property(fp::FakeCompositeType, prop::Any)
+    for (field_name, field_type) in fp.fields
+        if field_name == prop
+            return Par(field_type, field_name, fp.idx...)
+        end
+    end
+    error("Type $(fp.name) has no field $prop.")
+end
 
 @inline Node1(f::F, inner::I) where {F,I} = Node1{F,I}(inner)
 @inline Node2(f::F, inner1::I1, inner2::I2) where {F,I1,I2} = Node2{F,I1,I2}(inner1, inner2)
@@ -145,8 +198,10 @@ struct Identity end
 
 @inline (v::ParSource)(i, x, θ) = i
 @inline (v::ParIndexed{I,n})(i, x, θ) where {I,n} = @inbounds v.inner(i, x, θ)[n]
+@inline (v::ParFielded{I,n})(i, x, θ) where {I,n} = getproperty(v.inner(i, x, θ), n)
 
 (v::ParIndexed)(i::Identity, x, θ) = NaN # despecialized
+(v::ParFielded)(i::Identity, x, θ) = NaN # despecialized
 (v::ParSource)(i::Identity, x, θ) = NaN # despecialized
 
 """
