@@ -109,8 +109,8 @@ function _exa_ac_power_struct_model(backend, filename)
     c9 = ExaModels.constraint(w, b.pd + b.gs * vm[i]^2 for (i, b) in enumerate(data.bus))
     c10 = ExaModels.constraint(w, b.qd - b.bs * vm[i]^2 for (i, b) in enumerate(data.bus))
 
-    c11 = ExaModels.constraint!(w, c9, a_bus => -p[i] for (i, (l, a_bus, j)) in enumerate(data.arc))
-    c12 = ExaModels.constraint!(w, c10, a_bus => -q[i] for (i, (l, a_bus, j)) in enumerate(data.arc))
+    c11 = ExaModels.constraint!(w, c9, a_bus => p[i] for (i, (l, a_bus, j)) in enumerate(data.arc))
+    c12 = ExaModels.constraint!(w, c10, a_bus => q[i] for (i, (l, a_bus, j)) in enumerate(data.arc))
 
     c13 = ExaModels.constraint!(w, c9, g.bus => -pg[i] for (i, g) in enumerate(data.gen))
     c14 = ExaModels.constraint!(w, c10, g.bus => -qg[i] for (i, g) in enumerate(data.gen))
@@ -188,7 +188,8 @@ function _jump_ac_power_struct_model(backend, filename)
                 b.c4 * (vm[b.fbus] * vm[b.tbus] * sin(va[b.fbus] - va[b.tbus]))
             )
         )
-
+    end
+    for (i, b) in zip(data.arc_idxs, data.branch)
         push!(
             c3,
             JuMP.@NLconstraint(
@@ -199,8 +200,9 @@ function _jump_ac_power_struct_model(backend, filename)
                 b.c3 * (vm[b.fbus] * vm[b.tbus] * sin(va[b.fbus] - va[b.tbus]))
             )
         )
-
-        # To side of the branch flow
+    end
+    # To side of the branch flow
+    for (i, b) in zip(data.arc_idxs, data.branch)
         push!(
             c4,
             JuMP.@NLconstraint(
@@ -211,7 +213,8 @@ function _jump_ac_power_struct_model(backend, filename)
                 b.c2 * (vm[b.tbus] * vm[b.fbus] * sin(va[b.tbus] - va[b.fbus]))
             )
         )
-        
+    end
+    for (i, b) in zip(data.arc_idxs, data.branch)
         push!(
             c5,
             JuMP.@NLconstraint(
@@ -222,7 +225,8 @@ function _jump_ac_power_struct_model(backend, filename)
                 b.c1 * (vm[b.tbus] * vm[b.fbus] * sin(va[b.tbus] - va[b.fbus]))
             )
         )
-
+    end
+    for (i, b) in zip(data.arc_idxs, data.branch)
         push!(
             c6,
             JuMP.@NLconstraint(
@@ -230,9 +234,12 @@ function _jump_ac_power_struct_model(backend, filename)
                 b.angmin <= va[b.fbus] - va[b.tbus] <= b.angmax
             )
         )
-
-        # Apparent power limit, from side and to side
+    end
+    # Apparent power limit, from side and to side
+    for (i, b) in zip(data.arc_idxs, data.branch)
         push!(c7, JuMP.@NLconstraint(model, p[i.fidx]^2 + q[i.fidx]^2 <= b.ratea^2))
+    end
+    for (i, b) in zip(data.arc_idxs, data.branch)
         push!(c8, JuMP.@NLconstraint(model, p[i.tidx]^2 + q[i.tidx]^2 <= b.ratea^2))
     end
 
@@ -242,7 +249,7 @@ function _jump_ac_power_struct_model(backend, filename)
     end
     bus_gens = [[] for i in 1:length(data.bus)]
     for (i, g) in enumerate(data.gen)
-        push!(bus_arcs[g.bus], i)
+        push!(bus_gens[g.bus], i)
     end
     for (i, b) in enumerate(data.bus)
         push!(
@@ -255,7 +262,8 @@ function _jump_ac_power_struct_model(backend, filename)
                 b.gs * vm[i]^2
             )
         )
-
+    end
+    for (i, b) in enumerate(data.bus)
         push!(
             c10,
             JuMP.@NLconstraint(

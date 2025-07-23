@@ -137,14 +137,9 @@ function runtests()
                         jump_model = getfield(@__MODULE__, Symbol("_jump_$(name)_model"))
 
                         m, vars0, cons0 = exa_model(nothing, args)
-                        @info m
-                        @info m.cons
-                        @info typeof(m.cons)
-                        @info m.objs
                         m0 = WrapperNLPModel(m)
 
                         m, vars2, cons2 = jump_model(nothing, args)
-                        @info m
                         m2 = MathOptNLPModel(m)
 
                         set_optimizer(m, MadNLP.Optimizer)
