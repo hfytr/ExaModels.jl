@@ -121,5 +121,5 @@ function _simdfunction(f, full_exp_refs1, full_exp_refs2, exps, isexp, o0, o1, o
     o2step = length(a2)
     c2 = Compressor(Tuple(findfirst(isequal(di), a2) for di in y2))
 
-    SIMDFunction(f, c1, c2, o0, o1, o2, o1step, o2step)
+    SIMDFunction(Ref(f), c1, c2, o0, o1, o2, o1step, o2step)
 end

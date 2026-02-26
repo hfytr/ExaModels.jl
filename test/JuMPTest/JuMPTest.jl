@@ -58,7 +58,7 @@ function fixed_variable_e2etest()
     @test typeof(em.objs.inner.f.f) <: ExaModels.Node2{
         typeof(*),
         T1,
-        ExaModels.Node1{typeof(abs2),ExaModels.Var{T2}},
+        ExaModels.Node1{typeof(abs2)},
     } where {T1<:ExaModels.ParIndexed,T2<:ExaModels.ParIndexed}
 
     jm = JuMP.Model()

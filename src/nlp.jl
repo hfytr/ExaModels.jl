@@ -302,10 +302,11 @@ julia> result = ipopt(m; print_level=0)    # solve the problem
 ```
 """
 function ExaModel(c::C; prod=nothing) where {C<:ExaCore}
+    find_subexprs(c)
     return ExaModel(
-        c.obj,
-        c.con,
-        c.exp,
+        freeze(c.obj),
+        freeze(c.con),
+        freeze(c.exp),
         c.varis,
         c.isexp,
         c.nexp,
@@ -850,7 +851,7 @@ function simd_expr(c::ExaCore, gen,)
     push!(c.e2_cnts, o2step)
     append!(c.backend, c.e2_cnts, e2_cnts, length(e2_cnts))
 
-    SIMDFunction(f, c1, c2, c.nvar, o1, o2, o1step, o2step)
+    SIMDFunction(Ref(f), c1, c2, c.nvar, o1, o2, o1step, o2step)
 end
 
 expr!(m, x, θ) = _expr!(m.exps, m, x, θ)
@@ -1204,6 +1205,118 @@ function multipliers(result::SolverCore.AbstractExecutionStats, y::Constraint)
     return view(result.multipliers, (o+1):(o+len))
 end
 
-
 _adapt_gen(gen) = Base.Generator(gen.f, collect(gen.iter))
 _adapt_gen(gen::Base.Generator{P}) where {P<:Union{AbstractArray,AbstractRange}} = gen
+
+mutable struct ExprData
+    num_occurences::UInt
+    refs::Vector{Base.Ref{<:AbstractNode}}
+end
+
+const DeDupedExprs = Dict{AbstractNode,ExprData}
+
+function process_toplevel_expr(f::AbstractNode, exprs::DeDupedExprs, ref::Base.Ref{<:AbstractNode}) 
+    if haskey(exprs, f)
+        push!(exprs[f].refs, ref)
+        exprs[f].num_occurences += 1
+    else
+        exprs[f] = ExprData(1, [ref])
+    end
+end
+function process_toplevel_expr(f, exprs, ref)
+    return nothing
+end
+
+function traverse(node::Base.Ref{<:Node1}, callback::F1, state::S) where {F1,S}
+    state = callback(node, state)
+    traverse(node[].inner, callback, state)
+    return state
+end
+
+function traverse(node::Base.Ref{<:Node2}, callback::F1, state::S) where {F1,S}
+    state = callback(node, state)
+    traverse(node[].inner1, callback, state)
+    traverse(node[].inner2, callback, state)
+    return state
+end
+
+function traverse(node, callback, state)
+    return state
+end
+
+function traverse_exprs(c::C, callback::F, state::S) where {C<:ExaCore, F<:Function, S}
+    obj = c.obj
+    while obj != ObjectiveNull()
+        state = traverse(obj.f.f, callback, state)
+        obj = obj.inner
+    end
+    con = c.con
+    while con != ConstraintNull()
+        state = traverse(con.f.f, callback, state)
+        con = con.inner
+    end
+    exp = c.exp
+    while exp != ExpressionNull()
+        state = traverse(exp.f.f, callback, state)
+        exp = exp.inner
+    end
+    return state
+end
+
+function build_exprs_dict(node_ref::Base.Ref{<:AbstractNode}, exprs)
+    process_toplevel_expr(node_ref[], exprs, node_ref)
+    return exprs
+end
+
+function fix_num_occurences(node_ref::Base.Ref{<:AbstractNode}, (exprs, parent_occurrences))
+    num_occurences = exprs[node_ref[]].num_occurences
+    exprs[node_ref[]].num_occurences /= parent_occurrences
+    return (exprs, num_occurences)
+end
+
+function expr_policy(expr)
+    # TODO
+    return false
+end
+
+function find_subexprs(c::C) where {C<:ExaCore}
+    exprs = DeDupedExprs()
+    traverse_exprs(c, build_exprs_dict, exprs)
+    traverse_exprs(c, fix_num_occurences, (exprs, 1.0))
+    for (expr, data) in exprs
+        if expr_policy(expr)
+            for ref in data.refs
+                # TODO
+            end
+        end
+    end
+end
+
+# many structures use Ref{} in order to support automatic finding of subexpr
+# this prevents llvm from inlining: unacceptable during runtime
+# do a pass before converting ExaCore -> ExaModel
+function freeze(o::Objective{O,F,I}) where {O,F,I,R<:Base.Ref{F}}
+    Objective(freeze(o.inner), freeze(o.f), o.itr)
+end
+function freeze(e::Expression{E,R,I,O,S}) where {E,F,I,O,S,R<:Base.Ref{F}}
+    Expression(freeze(e.inner), freeze(e.f), e.itr, e.offset, e.size)
+end
+function freeze(c::Constraint{C,R,I,O}) where {C,F,I,O,R<:Base.Ref{F}}
+    Constraint(freeze(c.inner), freeze(c.f), c.itr, c.offset)
+end
+function freeze(c::ConstraintAug{C,R,I}) where {C,F,I,R<:Base.Ref{F}}
+    ConstraintAug(freeze(c.inner), freeze(c.f), c.itr, c.oa)
+end
+
+freeze(o::ObjectiveNull) = ObjectiveNull()
+freeze(o::ExpressionNull) = ExpressionNull()
+freeze(o::ConstraintNull) = ConstraintNull()
+
+function freeze(f::SIMDFunction{R,C1,C2}) where {F,C1,C2,R<:Base.Ref{F}}
+    SIMDFunction(freeze(f.f), f.comp1, f.comp2, f.o0, f.o1, f.o2, f.o1step, f.o2step)
+end
+
+freeze(x::Base.Ref) = freeze(x[])
+freeze(x::Node1{F,I1}) where {F,I1} = Node1(F,freeze(x.inner[]))
+freeze(x::Node2{F,I1,I2}) where {F,I1,I2} = Node2(F, freeze(x.inner1[]), freeze(x.inner2[]))
+freeze(n::AbstractNode) = n

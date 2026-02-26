@@ -123,11 +123,14 @@ end
 @inline Base.getindex(n::VarSource, i) = Var(i)
 @inline Base.getindex(::ParameterSource, i) = ParameterNode(i)
 
-@inline Node1(f::F, inner::I) where {F,I} = Node1{F,I}(inner)
-@inline Node2(f::F, inner1::I1, inner2::I2) where {F,I1,I2} = Node2{F,I1,I2}(inner1, inner2)
-
+@inline Node1(f::F, inner::I) where {F,I} = Node1{F,Ref{I}}(Ref(inner))
+@inline Node1(f::DataType, inner::I) where {F,I} = Node1{f,I}(inner)
+@inline Node2(f::F, inner1::I1, inner2::I2) where {F,I1,I2} = Node2{F,Ref{I1},Ref{I2}}(Ref(inner1), Ref(inner2))
+@inline Node2(f::DataType, inner1::I1, inner2::I2) where {I1,I2} = Node2{f,I1,I2}(inner1, inner2)
 
 struct Identity end
+
+@inline (n::Base.Ref{AbstractNode})(i, x, theta) = n[](i, x, theta)
 
 @inline (v::Var{I})(i, x, θ) where {I<:AbstractNode} = @inbounds x[v.i(i, x, θ)]
 @inline (v::Var{I})(i, x, θ) where {I} = @inbounds x[v.i]
@@ -327,3 +330,27 @@ end
 @inline (v::Null{N})(i, x::V, θ) where {N,T,V<:AbstractVector{T}} = T(v.value)
 @inline (v::Null{N})(i, x::AdjointNodeSource{T}, θ) where {N,T} = AdjointNull()
 @inline (v::Null{N})(i, x::SecondAdjointNodeSource{T}, θ) where {N,T} = SecondAdjointNull()
+
+function Base.hash(
+    n::Node1{F, Base.Ref{N1}}, 
+) where {F, N1<:AbstractNode}
+    return hash(Node1{F,N1}(n.inner[]))
+end
+function Base.hash(
+    n::Node2{F, Base.Ref{N1}, Base.Ref{N2}}, 
+) where {F, N1<:AbstractNode, N2<:AbstractNode}
+    return hash(Node2{F, N1, N2}(n.inner1[], n.inner2[]))
+end
+
+function Base.:(==)(
+    n1::Node1{F, R1}, 
+    n2::Node1{F, R1}
+) where {F, R1<:Base.Ref{<:AbstractNode}}
+    return isequal(n1.inner[], n2.inner[])
+end
+function Base.:(==)(
+    n1::Node2{F, R1, R2}, 
+    n2::Node2{F, R1, R2}
+) where {F, R1<:Base.Ref{<:AbstractNode}, R2<:Base.Ref{<:AbstractNode}}
+    return isequal(n1.inner1[], n2.inner1[]) && isequal(n1.inner2[], n2.inner2[])
+end
